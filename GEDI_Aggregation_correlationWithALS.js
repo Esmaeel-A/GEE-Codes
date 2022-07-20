@@ -1,58 +1,143 @@
-
 //##################################################################################################             
-               //       ## Code for VAlidating GEDI against ALS ##
+               //         ## Code for VAlidating GEDI against given CHM ##
+//##########################################    #################################################### 
+//####################################       by        #############################################
+//                                     Esmaeel Adrah
+//#################  Earth observation center, Institute of climate change, UKM  ###################
+//######################   20/4/2022        #####       esmaeelad@gmail.com   ######################
+
+//##################################################################################################
+//##################################################################################################
+//##################################################################################################
+
+
+//Description
                
-               
-               
-// The script default output are:
-//   1.Charting scatter plots
-//   2.Printing 1.1correlation vlaue, 1.2P-value, 1.3RMSE, 1.4rRMSE %, and 1.5 dleta error mean
-// The defualt examine 5 GEDI metrics, namely [50,75,90,95,100] against 4 ALS aggregation method in different resolution
-// The resolution, the above, and GEDI aggregation methods can be changed by setting the parameters in step 2
-// The optional and additonal output of the script are:
-//   3. basic summary statistics for GEDI and ALS in the area 
-//   4. GEDI shots coverage statistics
-//   5. Boxplot of ALL ALS and GEDI hegihts
-//   6. Values of ALL ALS and GEDI hegihts
-//   7. Correlation Values separetly
+// The script default examine a chosen  GEDI metric based on IMPORTED CHM, and:
+//   1. Allow control over aggregation methods, resampling resolutions and applied filters
+//   2. Calculate GEDI spatial coverage statistic for the given site
+//   3. Calculate GEDI and CHM basic statistic for the given site and plot Box plot
+//   4. Charting scatter plot of GEDI and CHM
+//   5. Calculating  5.1correlation vlaue, 5.2P-value, 5.3RMSE, 5.4rRMSE %, and 5.5 Absolute mean error
+
+
+
+// The optional and additonal outputs of the script can allow control for comparing multiple GEDI metrics and resolutions,  and:
+//   6. Calculate additional statistics for GEDI and CHM 
+//   7. Listing the values of ALL CHM and GEDI hegihts
 //   8. Linear fit Values
-//   9. Correlation Charts 
-//  10. Histogram of GEDI and ALS 
+//   9. Histogram of GEDI and CHM 
+//  10. Histogram of Elevation and Slope
+
 
 //##################################################################################################         
 //##################################################################################################
        
         // STEP 1        ##       #IMPORT DATA#         ##
-             //#1.1 Import CHM at 1m resolution and call it 'ALS'
-             //#1.2 Import Polygon to determin ALS data extent and call it 'ALSpoly'
-             //#1.3 Import FOREST polygon to clip GEDI and call it 'ForestPoly'
-
+             
+             //#1.1 Import CHM and call it 'CHM' 
+                // Note: if CHM is large (~ > 200km2), GEE memory limits will be exceeded 
+                  // clipping the CHM to smaller parts is recommended in this case
+             
+             //Optional
+             
+             //#1.2 (optional : SRTM is a default if not imported)  Import DEM and and call it 'DEM'
+             //#1.3 (optional : no default required)  Import Polygon to determin CHM data extent and call it 'CHMpoly'
+             //#1.4 (optional : no default required)  Import FOREST polygon to clip GEDI and call it 'ForestPoly'
+             
 //##################################################################################################         
    
-        // STEP 2        ##       #SET Parameters#         ##
-        
-             //#2.1 Set the sampling resolution (the grid cell size in m)
-             var Cellsampling = 1000;  // [Options: Anything... 25, 30, 90, 250, 1000]
+        // STEP 2        ##       #SET Parameters and filters#         ##
+              
+              //#### GEDI ################################################
+             //#2.1 Set the used gedi metric and prefered sampling resolution (the grid cell size in m)
+             var Cellsampling = 25;  // [Options: Anything... 25, 30, 90, 250, 1000] 
+             var ChosenMetric = 95;     //  [Options: Any GEDI metric: 0, 1, 2, 3 ... 90, 98, 100]
+            
+             //#2.2 Set the GEDI filters parameters
+             
+             // Coverage filter 
+             var edge = 25 // the inner buffer from CHM boundary to eliminate GEDI shots on the edge 
+             var l8_treecover = 70 // filter for forest shots based on landsat tree cover ( > 70% probability for identifying forest cover)
 
-             //#2.2 Set the ALS aggregation method when gridding into lower resolution grid for comparing with GEDI
-             var ALSpercentile = 90;  // in case percentile [Options: 50, 90, 95, 100]
-             var ALSagg = 'ALSmean'// 'ALS'+ALSpercentile+''// [Options: ALSmean or ALSpercentile]
-                 
-                       
-             //#2.3 Set the validation method for  ALS Vs GEDI comparison
-             var GEDI_validation_method = 'FP' //  [Options: 'FP' or 'GC'] This defines how GEDI will be compared to ALS
-             //'FP': At footprint level: Only ALS will be aggregated to the Grid cell size using the different methods, the values will be extracted at the gedi footprint level for comparison
-             //'GC': At grid cell level: both the ALS and GEDI values will be aggregated to the grid cell cize and the comparison will be held at the grid cell size
-                    // in case aggregation:
-                    //#2.3.1 set the GEDI aggregation method
+             // Quality filter 
+             var quV = 1    // accepted quality_flag value (0 invalid or 1 valid)
+             var degrV = 0  //   accepted degredation threshold value
+             var sensMin = 0.9  // minimum accepted sensitivity value
+             var S_elv = 360  // filter for shots acquired at night only ( 0 for night shots --- 360 for all shots)
+             
+             var FilterCoverageBeam = 'no' // [Options: 'yes' Or 'no']  // filter for power beams only
+                                             // [Coverage beams: (0000 >> 0), (0001 >> 1), (0010 >> 2), (0011 >> 3 )]
+                                             // [Power beams:    (0101 >> 5), (0110 >> 6), (1000 >> 8), (1011 >> 11)]
+
+             // Outlier filter
+             var Hmax = 90
+             var Hmin = 2
+             
+             // Elevation attributes filter
+             var Filterslope = 'yes' // [Options: 'yes' Or 'no'] Slope filter ...if yes.. choose threshold value
+                    var SlopeFilterValue = 30 
+             var FilterElev = 'no'  // [Options: 'yes' Or 'no'] Elevation filter ...if yes.. choose threshold value
+                    var ElevationFilterValue = 1000
+             
+              //#### CHM ##################################################
+             //#2.3 Set the CHM aggregation  when gridding into lower resolution grid for comparing with GEDI
+             var CHMagg = 'CHM'+CHMpercentile+''//'CHMmean'//  [Options: CHMmean or CHMpercentile]
+             var CHMpercentile = 95;  // in case percentile [Options: 50, 90, 95, 100....]
+             // Outlier filter for CHM
+             var CHMmax = 90
+             var CHMmin = 2
+             
+             //#### Aggregation method ####################################
+             //#2.4 Set the validation method for  CHM Vs GEDI comparison
+             var GEDI_validation_method = 'FP' //  [Options: 'FP' or 'GC'] This defines how GEDI will be compared to CHM
+             //'FP': At footprint level: Only CHM will be aggregated to the Grid cell size using the different methods, the values will be extracted at the gedi footprint level for comparison
+             //'GC': At grid cell level: (only relevant when using >50m grid cell size) both the CHM and GEDI values will be aggregated to the grid cell cize and the comparison will be held at the grid cell size
+                    // in case aggregation GC:
+                    //#2.4.1 set the GEDI aggregation method
                        var GEDIAggregationMethod  = 'M' // [Options: 'M' Or 'P' ] M: mean aggregation, P: percentile aggregation   
                           // incase percetnile:
-                             var GEDIpercentile = 90;  // [Options: 90, 95, 100] This is aggregation percentile NOT GEDI metric
-                             
-
-
+                             var GEDIpercentile = 95;  // [Options: 90, 95, 100] This is aggregation percentile NOT GEDI metric
+            
+            
              
-             //#2.4 Charts Vizualization
+              //#### Control output ######################################
+              //# 2.4 Printing outputs
+              
+              
+              //#2.4.1  Basic summary statistics for GEDI and CHM in the area 
+                 
+              // Calcluate mean, max, min for GEDI and CHM in the site
+              var Printbasicstat = 'no'  //  [Options: 'yes' Or 'no']
+              
+              // GEDI spatial coverage statistics
+              var GEDIshotsCoverage = 'yes'   //  [Options: 'yes' Or 'no']
+                    var AdditionalCoveragestat = 'no' //  [Options: 'yes' Or 'no']
+                    
+                    
+              //#2.4.2 print boxplot of CHM and GEDI hegihts
+              var Printboxplot = 'yes'   //  [Options: 'yes' Or 'no']
+              
+              //#2.4.3 Print Pixel Values 
+              var PrintPixelVCHM = 'no' //  [Options: 'yes' Or 'no']
+
+              //#2.4.4 print correlation Chart 
+              var PrintCorCharts = 'yes'   // [Options: 'yes' Or 'no']
+              
+              //#2.4.5 print Histogram
+              var PrintHisto = 'yes'   //  [Options: 'yes' Or 'no']
+              
+              //#2.4.6 print slope and elevation histo
+              var ElevHisto = 'yes'   //  [Options: 'yes' Or 'no']
+             
+             
+             //#### Control colors and Vizualizations ####################
+             
+             //#2.5 Map Vizualizations : Height viz parameters
+              
+              var Vis = {min: 1,max: 80, palette: 'darkblue,red,orange,green,darkgreen',};
+ 
+             //#2.6 Charts Vizualization
              
               // #2.4.1 Boxplot color                          25        30       90       250        1000
               var Bpcolor = '999900'// [Options: Anycolor... 'green' , 'orange', '2ECCFA', '2d4051', '999900' ]
@@ -62,33 +147,6 @@
               var HC1 = 'f0af07'   //[Options: Anycolor...'f0af07','green', 'Magenta', 'black', 'cf513e', '1d6b99']         
               var HC2 = 'Magenta'   //[Options: Anycolor...'f0af07','green', 'Magenta', 'black', 'cf513e', '1d6b99']
               
-              //#2.5 Map Vizualizations : Height viz parameters
-              
-              var Vis = {min: 1,max: 80, palette: 'darkblue,red,orange,green,darkgreen',};
-  
-              //# 2.6 Printing outputs
-              //#2.6.1  print basic summary statistics for GEDI and ALS in the area 
-                 // GEDI metric to calcluate mean, max, min for the site
-              var ChosenMetric = 90;     //  [Options: Any GEDI metric: 0, 1, 2, 3 ... 90, 98, 100] //This is only for the summary statistics and Histogram
-              var Printbasicstat = 'yes'  //  [Options: 'yes' Or 'no']
-              // GEDI shots coverage statistics
-              var GEDIshotsCoverage = 'yes'   //  [Options: 'yes' Or 'no']
-              //#2.6.2 print boxplot of ALS and GEDI hegihts
-              var Printboxplot = 'yes'   //  [Options: 'yes' Or 'no']
-              //#2.6.3 print Print Pixel Values 
-              var PrintPixelVals = 'no' //  [Options: 'yes' Or 'no']
-              //#2.6.4 print Correlation Values separetly
-              var PrintCorVals = 'no'   //  [Options: 'yes' Or 'no']
-              //#2.6.5 print linear fit Values
-              var PrintLinearFit = 'no'  // [Options: 'yes' Or 'no']
-              //#2.6.6 print correlation Charts 
-              var PrintCorCharts = 'yes'   // [Options: 'yes' Or 'no']
-              //#2.6.7 print Histogram
-              var PrintHisto = 'yes'   //  [Options: 'yes' Or 'no']
-              //#2.6.8 Chart at the end 
-              var ChartAttheEnd = 'no'   //  [Options: 'yes' Or 'no']
-             
-             
        
 //##################################################################################################         
 //##################################################################################################
@@ -97,68 +155,77 @@
 //##################################################################################################
 
 
-//                 ####  Set the map and clipping parameters ####
+//             ####  Set the map and clipping parameters ####
 
 
 
 //Center the map
-//Map.centerObject(ALS);
+Map.centerObject(CHM);
 
-//Get the buffered poly from the ALS extent as an additional edge filter for GEDI data
-var ALSpolygon = ALSpoly;  //geometry()
-var ALSpolyBuffer = ALSpolygon.buffer({'distance': -25});
+//Get the buffered poly from the CHM extent as an additional edge filter for GEDI data
+var CHMpolygon = CHM.geometry();  //geometry()
+var CHMpolyBuffer = CHMpolygon.buffer({'distance': -edge});
 
-//clipfunction for the inner ALS buffer
-var clipToALS = function(image){
-  return image.clip(ALSpolyBuffer);
+//clipfunction for the inner CHM buffer
+var clipToCHM = function(image){
+  return image.clip(CHMpolyBuffer);
 };
-
-//clipfunction for the forest boundary
-var clipToForest = function(image){
-  return image.clip(ForestPoly);
-};
-
 
 ////##################################################################################################
 
 //                  ###  Get and filter the data ###
 
 
-// Quality filter mask function for GEDI data  //Apply 3 filter: quality_flag, degrade_flag,and outlier max
-var qufilter = function(im) {
-  return im.updateMask(im.select('quality_flag').eq(1))
-      .updateMask(im.select('degrade_flag').eq(0))
-      .updateMask(im.select('rh90').gt(2))
-  .updateMask(im.select('rh100').lt(90));
+//  filter mask function for GEDI data  
+var filter = function(im) {
+  return im.updateMask(im.select('quality_flag').eq(quV)) 
+      .updateMask(im.select('degrade_flag').lte(degrV))    
+      .updateMask(im.select('sensitivity').gt(sensMin))
+      .updateMask(im.select('rh'+ChosenMetric+'').gt(Hmin))
+  .updateMask(im.select('rh'+ChosenMetric+'').lt(Hmax))
+    .updateMask(im.select('solar_elevation').lte(S_elv))
+    .updateMask(im.select('landsat_treecover').gt(l8_treecover))
 };
 
-// GEDI data + Filter the shots with distance < 25m from the edge by clipping to inner buffer poly
-var GEDIdata = ee.ImageCollection('LARSE/GEDI/GEDI02_A_002_MONTHLY')
-                  .map(qufilter).map(clipToALS).map(clipToForest)
-                  .max();
+var Coveragebeamfilter = function(im) {
+  return im.updateMask(im.select('beam').gt(4))
+}
 
-// Filter ALS data
-var ALS = ALS.updateMask(ALS.select('b1').gt(2)).updateMask(ALS.select('b1').lt(90));
+// GEDI data + Filter the shots with distance < 25m from the edge by clipping to inner buffer poly
+var GEDIdata = ee.ImageCollection('LARSE/GEDI/GEDI02_A_002_MONTHLY').filterBounds(CHMpolygon)
+                  .map(filter).map(clipToCHM)
+                  ;
+    
+if (FilterCoverageBeam == 'yes') {
+
+var GEDIdata = GEDIdata.map(Coveragebeamfilter);
+} else {}
+    
+    
+
+           
+           
+// Filter CHM data
+var CHM = CHM.updateMask(CHM.select('b1').gt(CHMmin)).updateMask(CHM.select('b1').lt(CHMmax));
 
    
      
 //select the GEDI chosen metrics for the stat
-var GEDIrhStat = GEDIdata.select('rh'+ChosenMetric+'');
+var GEDIrhStat = GEDIdata.max().updateMask(CHM).select('rh'+ChosenMetric+'');
 //##################################################################################################
 
 
 //                  ###  Making a grid (fishnet) to aggregate the data into ###
 
 
-
-// Geometry of the ALS inner buffer (area of interest)
-var polygon = ALSpolyBuffer;
+// Geometry of the CHM inner buffer (area of interest)
+var polygon = CHMpolyBuffer;
 
 // Create a Feature from the Geometry.
 var polyFeature = ee.Feature(polygon, {id : 1});
 
 // Get projection of reference image (here we use GEDI projection)
-var proj = GEDIdata.projection();
+var proj = GEDIdata.first().projection();
 
 
 
@@ -174,22 +241,28 @@ if (GEDI_validation_method == 'FP') {
   var GEDIgrid = grid;
 }
 
+////##################################################################################################
 
-//GEDI circular footprint
-   
-     
-//select GEDI  metric
-var GEDIrh = ee.ImageCollection('LARSE/GEDI/GEDI02_A_002_MONTHLY').filterBounds(ALSpolyBuffer)
-                  .map(qufilter).map(clipToALS).map(clipToForest).select('rh'+ChosenMetric+'');
-                  
-var mosaic = GEDIrh.mosaic().setDefaultProjection({crs: GEDIrh.first().projection(), scale: GEDIrh.first().projection().nominalScale()});
+//                  ###  Get Elevation attributes ###
 
-var points = mosaic.sample({region: polygon,scale: GEDIrh.first().projection().nominalScale(),projection: GEDIrh.first().projection(),geometries: true});
+if(DEM === undefined){
+  print("DEM not defined, used default DEM as SRTM 30m")
+    var DEM = ee.Image('USGS/SRTMGL1_003').rename('DEM')}
+    else {
+    var DEM = DEM.rename('DEM')}
 
-// make a buffer around the points
-var buf = function(fc){return fc.buffer({'distance': 12.5});};
-var FP = points.map(buf)
-
+ // Importing module https://github.com/zecojls/tagee
+var TAGEE = require('users/joselucassafanelli/TAGEE:TAGEE-functions');
+  // Smoothing filter
+var gaussianFilter = ee.Kernel.gaussian({
+  radius: 3, sigma: 2, units: 'pixels', normalize: true
+});
+// Smoothing the DEM with the gaussian kernel.
+var DEM = DEM.convolve(gaussianFilter).resample("bilinear");
+var DEMAttributes = TAGEE.terrainAnalysis(TAGEE, DEM, CHMpolygon)
+var k = proj.nominalScale()
+ DEMAttributes = DEMAttributes.reproject(proj);
+ DEMAttributes = DEMAttributes.select("Elevation", "Slope", "Aspect", "MeanCurvature")
 
 //##################################################################################################
 
@@ -226,67 +299,64 @@ var CalcFcStat = function(Fcollection, Property){
    
 
 
+
 //##################################################################################################
 
 //                  ###  Add raw data, stats, and the grid to the map ###
 
 
 // Add raw data to the map
-Map.addLayer(GEDIdata, {}, 'GEDI_raw gridded', false);  // GEDI gridded
-Map.addLayer(FP, {}, 'GEDI footprint', false); // GEDI footprint
-Map.addLayer(ALS, Vis, 'ALS', false); // ALS
+Map.addLayer(GEDIdata.max().updateMask(CHM), {}, 'GEDI_raw gridded', false);  // GEDI gridded
+
+Map.addLayer(CHM, Vis, 'CHM', false); // CHM
 
 // Add the grid
 Map.addLayer(grid, {}, 'grid', false);
 
+Map.addLayer(DEMAttributes, {}, 'Elevation attributes', false)
 
-
-// Print the area and basic stat for GEDI and ALS, 'if you need to '
+// Print the area and basic stat for GEDI and CHM, 'if you need to '
 if (Printbasicstat == 'yes') {
-  CalcArea(ALSpolygon,1);  // The Area in km
-  CalcImStat(GEDIrhStat, ALSpolygon, 25);  // Mean, Max, Min GEDI
-  CalcImStat(ALS, ALSpolygon, 1);  // Mean, Max, Min ALS
+  CalcArea(CHMpolygon,1);  // The Area in km
+  CalcImStat(GEDIrhStat, CHMpolygon, 25);  // Mean, Max, Min GEDI
+  CalcImStat(CHM, CHMpolygon, 1);  // Mean, Max, Min CHM
 } else {}
 
 
 //##################################################################################################
 
 
-//                  ###  Aggregate the heights from ALS and GEDI to the grid in different methods###
+//                  ###  Aggregate the heights from CHM and GEDI to the grid in different methods###
 
 
-//Aggregate the heights from the ALS to the grid using percentiles then mean and the scale of the actual als chm (1m here)
+//Aggregate the heights from the CHM to the grid using percentiles then mean and the scale of the actual CHM chm (1m here)
 
 
-var ALSaggreg = function(ppp){
+var CHMaggreg = function(ppp){
   if (ppp  == 'mean') {
-      var Agg_ALS = ALS.reduceRegions({collection: grid,reducer: ee.Reducer.mean(),scale: 1,});
-      // Reduce the Grddid ALS back to images and stack
-      Agg_ALS = Agg_ALS.select('mean').reduceToImage(['mean'], ee.Reducer.first());
+      var Agg_CHM = CHM.reduceRegions({collection: grid,reducer: ee.Reducer.mean(),scale: 1,});
+      // Reduce the Grddid CHM back to images and stack
+      Agg_CHM = Agg_CHM.select('mean').reduceToImage(['mean'], ee.Reducer.first());
       // Rename the property of each image
-      Agg_ALS = Agg_ALS.select(['first'],['ALSmean']);
+      Agg_CHM = Agg_CHM.select(['first'],['CHMmean']);
 } else {
-      var Agg_ALS = ALS.reduceRegions({collection: grid,reducer: ee.Reducer.percentile([ppp], ['p'+ppp+'']),scale: 1,});
-      // Reduce the Grddid ALS back to images and stack
-      Agg_ALS = Agg_ALS.select('p'+ppp+'').reduceToImage(['p'+ppp+''], ee.Reducer.first());
+       Agg_CHM = CHM.reduceRegions({collection: grid,reducer: ee.Reducer.percentile([ppp], ['p'+ppp+'']),scale: 1,});
+      // Reduce the Grddid CHM back to images and stack
+      Agg_CHM = Agg_CHM.select('p'+ppp+'').reduceToImage(['p'+ppp+''], ee.Reducer.first());
       // Rename the property of each image
-      Agg_ALS = Agg_ALS.select(['first'],['ALS'+ppp+'']);
+      Agg_CHM = Agg_CHM.select(['first'],['CHM'+ppp+'']);
      }
-     return Agg_ALS};
+     return Agg_CHM};
 
 
-// Aggregate ALS per grid cell using different methods
- var Agg_MeanALS = ALSaggreg('mean');
- var Agg_50ALS = ALSaggreg(50);
- var Agg_90ALS = ALSaggreg(90);
- var Agg_95ALS = ALSaggreg(95);
- var Agg_100ALS = ALSaggreg(100);
+// Aggregate CHM per grid cell using different methods
+ var Agg_CHM = CHMaggreg(CHMpercentile);
 
 
 //Aggregate the GEDI heights to the grid using percentiles or mean and the scale of the actual GEDI cell (25m here)
 if (GEDI_validation_method == 'FP'){
     var GEDIaggregation = function(metric){
-  var GEDIm = GEDIdata.select('rh'+metric+'');
+  var GEDIm = GEDIdata.max().updateMask(CHM).select('rh'+metric+'');
   GEDIm = GEDIm.reduceRegions({collection: GEDIgrid,reducer: ee.Reducer.mean().unweighted(),scale: 25,});
   // Reduce the Grddid GEDI back to images and stack
   GEDIm = GEDIm.select('mean').reduceToImage(['mean'], ee.Reducer.first());
@@ -295,7 +365,7 @@ if (GEDI_validation_method == 'FP'){
   return GEDIm};
 } else if (GEDIAggregationMethod  == 'M') {
   var GEDIaggregation = function(metric){
-  var GEDIm = GEDIdata.select('rh'+metric+'');
+  var GEDIm = GEDIdata.max().updateMask(CHM).select('rh'+metric+'');
   GEDIm = GEDIm.reduceRegions({collection: GEDIgrid,reducer: ee.Reducer.mean().unweighted(),scale: 25,});
   // Reduce the Grddid GEDI back to images and stack
   GEDIm = GEDIm.select('mean').reduceToImage(['mean'], ee.Reducer.first());
@@ -304,7 +374,7 @@ if (GEDI_validation_method == 'FP'){
   return GEDIm};
 } else {
   var GEDIaggregation = function(metric){
-  var GEDIm = GEDIdata.select('rh'+metric+'');
+  var GEDIm = GEDIdata.max().updateMask(CHM).select('rh'+metric+'');
   GEDIm = GEDIm.reduceRegions({collection: GEDIgrid,reducer: ee.Reducer.percentile([GEDIpercentile], ['p'+GEDIpercentile+'']).unweighted(),scale: 25,});
   // Reduce the Grddid GEDI back to images and stack
   GEDIm = GEDIm.select('p'+GEDIpercentile+'').reduceToImage(['p'+GEDIpercentile+''], ee.Reducer.first());
@@ -313,26 +383,30 @@ if (GEDI_validation_method == 'FP'){
   return GEDIm};}
 
 // Aggregate GEDI per cell for each metric of interest
-var Agg_50GEDI = GEDIaggregation(50);
-var Agg_75GEDI = GEDIaggregation(75);
-var Agg_90GEDI = GEDIaggregation(90);
-var Agg_95GEDI = GEDIaggregation(95);
-var Agg_100GEDI = GEDIaggregation(100);
+var Agg_GEDI = GEDIaggregation(ChosenMetric);
+
 
 // Mask to avoid missing values and add bands from one to another 
-var Msked_MeanALS = Agg_MeanALS.mask(Agg_50GEDI);
-var Msked_50ALS = Agg_50ALS.mask(Agg_50GEDI);
-var Msked_90ALS = Agg_90ALS.mask(Agg_50GEDI);
-var Msked_95ALS = Agg_95ALS.mask(Agg_50GEDI);
-var Msked_100ALS = Agg_100ALS.mask(Agg_50GEDI);
+var Masked_CHM = Agg_CHM.mask(Agg_GEDI);
 
-var CorAll = Msked_MeanALS.addBands(Msked_50ALS).addBands(Msked_90ALS).addBands(Msked_95ALS).addBands(Msked_100ALS)
-                         .addBands(Agg_50GEDI).addBands(Agg_75GEDI).addBands(Agg_90GEDI).addBands(Agg_95GEDI).addBands(Agg_100GEDI);
+var Slope = DEMAttributes.select("Slope")
+var Elevation = DEMAttributes.select("Elevation")
+var CorAll = Masked_CHM.addBands(Agg_GEDI).addBands(Slope).addBands(Elevation)
 
-var CorAll = CorAll.updateMask(CorAll.select('ALSmean').gt(0));
+var CorAll = CorAll.updateMask(CorAll.select('CHM'+CHMpercentile+'').gt(0));
+
+if (Filterslope == 'yes') {
+ //Slope filter
+ var CorAll = CorAll.updateMask(CorAll.select('Slope').lt(SlopeFilterValue));
+} else {}
+if (FilterElev == 'yes') {
+//Elevation filter
+var CorAll = CorAll.updateMask(CorAll.select('Elevation').lt(ElevationFilterValue));
+} else {}
+
 
 // Add the aggregated grid to the map
-Map.addLayer(CorAll, {min: 1,max: 70}, 'Aggregated ALS & GEDI', false);
+Map.addLayer(CorAll, {min: 1,max: 80}, 'Aggregated CHM & GEDI', false);
 
 //##################################################################################################
 
@@ -349,15 +423,31 @@ if (GEDIshotsCoverage == 'yes') {
   var Nshots = ee.Number(GEDIrhStat.reduceRegion({geometry: polygon,reducer: ee.Reducer.count(),scale: 25,}).get('rh'+ChosenMetric+''));
   print('Actual N. of GEDI shots in the region after filtering:', Nshots);
 
- // number of cell in the grid
-  var Ncell = ee.Number(Agg_100ALS.reduceRegion({geometry: polygon,reducer: 'count',scale: Cellsampling,}).get('ALS100'));
-  print('N. of '+Cellsampling+'m2 cells in the grid:', Ncell);
-
  // Sample size
- var Ssize = CorAll.select(['GEDI100']);
+ var Ssize = CorAll.select(['GEDI'+ChosenMetric+'']);
  
- var SsizeFP = ee.Number(Ssize.reduceRegion({geometry: polygon,reducer: 'count',scale: 25,}).get('GEDI100'));
- var SsizeGC = ee.Number(Ssize.reduceRegion({geometry: polygon,reducer: 'count',scale: Cellsampling,}).get('GEDI100'));
+ 
+ var SsizeFP = ee.Number(Ssize.reduceRegion({geometry: polygon,reducer: 'count',scale: 25,}).get('GEDI'+ChosenMetric+''));
+ var SsizeGC = ee.Number(Ssize.reduceRegion({geometry: polygon,reducer: 'count',scale: Cellsampling,}).get('GEDI'+ChosenMetric+''));
+
+
+
+ 
+    // Number of GEDI shots per grid cell in the etire region
+    var grid1km = polyFeature.geometry().coveringGrid(proj,1000);
+   var FCshotsPerCell = GEDIrhStat.reduceRegions({collection: grid1km,reducer: ee.Reducer.count(),scale: 25,});
+   var NshotsPerCell = ee.Number(FCshotsPerCell.reduceColumns(ee.Reducer.mean(), ['count']).get('mean'));
+   print('Average N. of shots per 1km cell', NshotsPerCell);
+  
+  if (AdditionalCoveragestat == 'yes') {
+   // Number of GEDI shots per grid cell when there is coverage only
+   var filterNshotsPerCell = FCshotsPerCell.filter(ee.Filter.gt('count', 0));
+   // get the stats (mean, max, min) of the shot coverage 
+    print('Stat of the N. of shots Coverage per 1km cell (In the sampled cells):');
+    CalcFcStat(filterNshotsPerCell, 'count');
+// number of cell in the grid
+  var Ncell = ee.Number(Agg_CHM.reduceRegion({geometry: polygon,reducer: 'count',scale: Cellsampling,}).get('CHM'+CHMpercentile+''));
+  print('N. of '+Cellsampling+'m2 cells in the grid:', Ncell);
 
 //if method FP the scale is 25, otherwise it's Cellsampling
  if (GEDI_validation_method == 'FP') {
@@ -366,17 +456,13 @@ if (GEDIshotsCoverage == 'yes') {
     print('Gridded sample size(To Gridded Cells):', SsizeGC);
  
   } 
-    // Number of GEDI shots per grid cell in the etire region
-   var FCshotsPerCell = GEDIrhStat.reduceRegions({collection: grid,reducer: ee.Reducer.count(),scale: 25,});
-   var NshotsPerCell = ee.Number(FCshotsPerCell.reduceColumns(ee.Reducer.mean(), ['count']).get('mean'));
-   print('Average N. of shots per'+Cellsampling+'m cell (In the whole region):', NshotsPerCell);
-  
-   // Number of GEDI shots per grid cell when there is coverage only
-   var filterNshotsPerCell = FCshotsPerCell.filter(ee.Filter.gt('count', 0));
-   // get the stats (mean, max, min) of the shot coverage 
-    print('Stat of the N. of shots Coverage per'+Cellsampling+'m cell (In the sampled cells):');
-    CalcFcStat(filterNshotsPerCell, 'count');
+} else {}
 
+var Ged = CorAll.select(['GEDI'+ChosenMetric+'']);
+var GedName = Ged.bandNames();
+
+
+        
 } else {}
 
 //##################################################################################################
@@ -386,7 +472,7 @@ if (GEDIshotsCoverage == 'yes') {
 // Boxplot function to plot image bands
 function boxPlotChart(image, xLabels, percentiles) {
   var reducer2 = ee.Reducer.mean().setOutputs(['main']).combine({ reducer2: ee.Reducer.percentile(percentiles), sharedInputs: true });
-  var data = image.reduceRegion({ reducer: reducer2, geometry: ALS.geometry(), scale: Cellsampling,
+  var data = image.reduceRegion({ reducer: reducer2, geometry: CHM.geometry(), scale: Cellsampling,
   maxPixels: 1e13 });
 
   var cols = [
@@ -428,7 +514,7 @@ function boxPlotChart(image, xLabels, percentiles) {
           },
           lineWidth: 0,
           series: [{'color': Bpcolor}],//'234f1c', 'orange', '2ECCFA', '2d4051', '999900'
-          intervals: {
+          intervCHM: {
             barWidth: 0.5,
             boxWidth: 1,
             pointSize: 2,
@@ -452,10 +538,12 @@ function boxPlotChart(image, xLabels, percentiles) {
   return ui.Chart(dataTable, 'LineChart', options);
 }  
 var percentiles = [0, 25, 75, 100];
-var bandsName = CorAll.bandNames();
-var boxplotC = boxPlotChart(CorAll, bandsName, percentiles);
+var GEDI_CHM = CorAll.select('CHM'+CHMpercentile+'', 'GEDI'+ChosenMetric+'')
 
-// Print the area and basic stat for GEDI and ALS, 'if you need to '
+var bandsName = GEDI_CHM.bandNames();
+var boxplotC = boxPlotChart(GEDI_CHM, bandsName, percentiles);
+
+// Print the area and basic stat for GEDI and CHM, 'if you need to '
 if (Printboxplot == 'yes') {
   print(boxplotC);
 } else {}
@@ -464,40 +552,41 @@ if (Printboxplot == 'yes') {
 //##################################################################################################
 
 
-      //                                ###  Correlation ###
+//                                ###  Correlation ###
 //                  ###  Extract values, Chart and check correlation ###
 
 // Extracting pixel values
 if (GEDI_validation_method == 'FP') {
-  var pixelVals = CorAll.reduceRegion(
+  var pixelVCHM = CorAll.reduceRegion(
     {reducer: ee.Reducer.toList(), geometry: polyFeature.geometry(), scale: 25});
 } else {
-  var pixelVals = CorAll.reduceRegion(
+  var pixelVCHM = CorAll.reduceRegion(
     {reducer: ee.Reducer.toList(), geometry: polyFeature.geometry(), scale: Cellsampling});
 }
 
 // print the dictionary object to the console to check observations
-if (PrintPixelVals == 'yes') {
-  print('pixel values Object:', pixelVals);
+if (PrintPixelVCHM == 'yes') {
+  print('pixel values Object:', pixelVCHM);
 } else {}
 
-// Prepare values to be plotted along x axe
-var x = ee.List(pixelVals.get(ALSagg));
+ 
 
+// Prepare values to be plotted along x axe
+var x = ee.List(pixelVCHM.get('CHM'+CHMpercentile+''));
 
 // function to chart values along y axe as a function of GEDI metric
 
 var correlationChart = function(GEDImet){
 
 // Get values from dictionary and make lists
-var y = ee.List(pixelVals.get(GEDImet));
+var y = ee.List(pixelVCHM.get(GEDImet));
 
 // Define the chart and set options
 var chartCorrle = ui.Chart.array.values({array: y, axis: 0, xLabels: x}).setOptions({
-  title: 'Correlation '+GEDImet+' & '+ALSagg+'  aggregated to '+Cellsampling+'m pixel',
+  title: 'Correlation '+GEDImet+' & '+'CHM'+CHMpercentile+''+'  aggregated to '+Cellsampling+'m pixel',
   colors: [Chcolor],//'green', 'orange', '2ECCFA', '2d4051', '999900'
   hAxis: {
-    title: 'ALS ',
+    title: 'CHM ',
     titleTextStyle: {italic: false, bold: true},
     gridlines: {color: 'FFFFFF'},
     viewWindow: {min: 0, max: 100}},
@@ -525,15 +614,6 @@ legend: {position: 'none'},
 return chartCorrle};
 
 
-//Check linear fit as a function of GEDI metric
-var linearfitf = function(GEDImet){
-
-// get values from dictionary and make lists
-var y = ee.List(pixelVals.get(GEDImet));
-
-var linearfit = ee.Array.cat([x, y], 1).reduce(ee.Reducer.linearFit(),[0],1);
-return linearfit;};
-
 // sample the stack from the image
 var sample = CorAll.sample({'region':polyFeature.geometry(), 
                             'scale': 25});
@@ -541,14 +621,11 @@ var correl = ee.Reducer.pearsonsCorrelation();
 // Get Correlation values
 var CorrelationV = function(GEDImet){
 // Set the correlation properties
-var CorrelV = sample.reduceColumns(correl, [GEDImet, ALSagg]);
+var CorrelV = sample.reduceColumns(correl, [GEDImet, 'CHM'+CHMpercentile+'']);
 
 
 
 return CorrelV;};
-
-//note: printing the results nested in error function
-
 
 
 //##################################################################################################
@@ -559,9 +636,11 @@ return CorrelV;};
 // transfer the values to arrays
 var N = ee.Array(x);
 
+
+
 // get the values as a function for GEDI metric
-var error = function(GEDImet){
-var y = ee.List(pixelVals.get(GEDImet));
+
+var y = ee.List(pixelVCHM.get('GEDI'+ChosenMetric+''));
 var NN = ee.Array(y);
 
 // Calculate the RMSE
@@ -584,14 +663,9 @@ var d = N.subtract(NN);
 
 
 //Get the correlation values
-var cor = CorrelationV(GEDImet);
+var cor = CorrelationV('GEDI'+ChosenMetric+'');
 var correV = ee.Number(cor.get('correlation'));
 var pVal = ee.Number(cor.get('p-value'));
-
-var ved = [correV, pVal, RMSE, rRMSE, d];
-return ved;
-};
-
 
 
 //##################################################################################################
@@ -604,41 +678,15 @@ if (PrintCorCharts == 'yes') {
   print(correlationChart(GEDImet));
 } else {}
 
-//Conditional printing for Linearfit
-if (PrintLinearFit == 'yes') {
-  print('Linear fit:', linearfitf(GEDImet));
-} else {}
-
-
-//Conditional printing for Correlation values
-if (PrintCorVals == 'yes') {
-  print('Correlation Values:',  CorrelationV(GEDImet));
-} else {}
 
 
 //Printing the results
-print('CorreV, pVal, RMSE, rRMSE, d:', error(GEDImet));
+print('CorreV, pVal, RMSE, rRMSE, AME:', correV, pVal, RMSE, rRMSE, d);
 };
 
 
-testCor('GEDI50')
-testCor('GEDI75')
-testCor('GEDI90')
-testCor('GEDI95')
-testCor('GEDI100')
 
-//Chart
-var ttestCor = function(GEDImet){
-  print(correlationChart(GEDImet));
-};
-
-if (ChartAttheEnd == 'yes') {
-ttestCor('GEDI50')
-ttestCor('GEDI75')
-ttestCor('GEDI90')
-ttestCor('GEDI95')
-ttestCor('GEDI100')
-} else {}
+testCor('GEDI'+ChosenMetric+'')
 
 
 
@@ -648,15 +696,15 @@ ttestCor('GEDI100')
 
 
 //                  ### Chart the heights in Histogram ###
-var select = CorAll.select([ALSagg, 'GEDI'+ChosenMetric+'']);
+var select = CorAll.select(['CHM'+CHMpercentile+'', 'GEDI'+ChosenMetric+'']);
 var bandsName = select.bandNames();
 
 // Define the chart and print it to the console.
 var Histo =
-    ui.Chart.image.histogram({image: select, region: ALS.geometry(), scale: Cellsampling})
+    ui.Chart.image.histogram({image: select, region: CHM.geometry(), scale: Cellsampling})
         .setSeriesNames(bandsName)
         .setOptions({
-          title: 'GEDI Vs ALS Histogram',
+          title: 'GEDI Vs CHM Histogram',
           hAxis: {
             title: 'Heights',
             titleTextStyle: {italic: false, bold: true},
@@ -676,59 +724,54 @@ if (PrintHisto == 'yes') {
 
 //##################################################################################################
 
-//##################################################################################################
+var Slo = DEMAttributes.select(['Slope']);
+var bandsName2 = Slo.bandNames();
 
- /*                    //deleted part//
-//                              ### Get statistics of the heights ###
+// Define the chart and print it to the console.
+var Histo2 =
+    ui.Chart.image.histogram({image: Slo, region: CHM.geometry(), scale: Cellsampling})
+        .setSeriesNames(bandsName2)
+        .setOptions({
+          title: 'Slope Histogram',
+          hAxis: {
+            title: 'Heights',
+            titleTextStyle: {italic: false, bold: true},
+          },
+          vAxis:
+              {title: 'Count', titleTextStyle: {italic: false, bold: true}},
+          colors: [HC1, HC2, 'f0af07','green', 'Magenta', 'black', 'cf513e', '1d6b99'],
+          histogram: {
+            bucketSize: 2,
+             },
+          lineWidth: 2,
+        });
 
-var Hstat = function(band) {
 
-  var image = CorAll.select([band]);
-  
-  var combinedReducer = ee.Reducer.mean()
-    .combine({reducer2: ee.Reducer.median(), sharedInputs: true})
-    .combine({reducer2: ee.Reducer.mode(),sharedInputs: true})
-    .combine({reducer2: ee.Reducer.variance(),sharedInputs: true})
-    .combine({reducer2: ee.Reducer.min(),sharedInputs: true})
-    .combine({reducer2: ee.Reducer.max(),sharedInputs: true})
-    .combine({reducer2: ee.Reducer.kurtosis(),sharedInputs: true})
-    .combine({reducer2: ee.Reducer.stdDev(),sharedInputs: true})
-    .combine({reducer2: ee.Reducer.kendallsCorrelation(),sharedInputs: true})
-    .combine({reducer2: ee.Reducer.skew(),sharedInputs: true});
-    
-  
-  var stats = image.reduceRegion({
-    reducer: combinedReducer,
-    geometry: ALS.geometry(),
-    scale: Cellsampling
-  });
-  
-  var meanKey = ee.String(band).cat('_mean')
-  var medianKey = ee.String(band).cat('_median')
-  var modeKey = ee.String(band).cat('_mode')
-  var varianceKey= ee.String(band).cat('_variance')
-  var minKey=ee.String(band).cat('_min')
-  var maxKey=ee.String(band).cat('_max')
-  var kurtosisKey=ee.String(band).cat('_kurtosis')
-  var skewKey=ee.String(band).cat('_skew')
-   
-  
-  var properties = {
-    'band': band,
-    'mean': stats.get(meanKey),
-    'median': stats.get(medianKey),
-    'mode': stats.get(modeKey),
-    'variance': stats.get(varianceKey),
-    'minimum': stats.get(minKey),
-    'maximum': stats.get(maxKey),
-    'kurtosis': stats.get(kurtosisKey),
-    'skew': stats.get(skewKey)
-  }
+var Elv = DEMAttributes.select(['Elevation']);
+var bandsName3 = Elv.bandNames();
 
-  return ee.Feature(null, properties)
-};
-var HeightStat = Hstat('ALS100')
+// Define the chart and print it to the console.
+var Histo3 =
+    ui.Chart.image.histogram({image: Elv, region: CHM.geometry(), scale: Cellsampling})
+        .setSeriesNames(bandsName3)
+        .setOptions({
+          title: 'Elevation Histogram',
+          hAxis: {
+            title: 'Heights',
+            titleTextStyle: {italic: false, bold: true},
+          },
+          vAxis:
+              {title: 'Count', titleTextStyle: {italic: false, bold: true}},
+          colors: ['black', 'cf513e', '1d6b99'],
+          histogram: {
+            bucketSize: 2,
+             },
+          lineWidth: 2,
+        });
 
-//print(HeightStat, 'HeightStat')
-/*/
-//##################################################################################################
+
+if (ElevHisto == 'yes') {
+  print(Histo2)
+  print(Histo3);
+} else {}
+
